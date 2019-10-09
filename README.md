@@ -6,29 +6,26 @@ This lab should take about an hour to complete.
 ## Requirements
 You will need an AWS account to run this lab. You will need a tool that allows you to SSH to EC2 instances in order to test connectivity between your VPCs. You must also have an existing SSH key pair in the region you are going to operate in.
 
+This lab will result in charges to your AWS account. The instances launced are all t3.nano so it won't break the bank but there are still some costs. There are also charges associated with Transit Gateway. Ensure that you delete the lab template at the end to prevent further charges - there are instructions for how to do this at the end of the lab.
+
 ## Lab Instructions
 ### Setup
-Download the CloudFormation template suppliied in this repo [tgw-lab.yaml](tgw-lab.yaml) or clone this repo to get both the template and these instructions.
-```
-git clone https://github.com/Brettles/transit-gateway-lab
-cd transit-gateway-lab
-```
+Using the [CloudFormation template](tgw-lab.yaml) in this repo, launch a stack in the region of your choice that supports Transit Gateway.
 
-Launch the CloudFormation template in the region of your choice that supports Transit Gateway.
+The template creates four VPCs and four EC2 hosts (one in each region) as per the following diagram.
 
-The template creates four VPCs and four EC2 hsots (one in each region) as per the following diagram.
 ![VPC Setup](VPC-Setup.png)
 
 You must select a SSH key pair in the region you are using. If you haven't already done so, create a key pair before launching the template.
 
 VPC 1 and VPC 3 have Internet access. You will be able to directly SSH to those instances using the key pair you choose. The public and private IP addresses for all of the instances will be in the Outputs section of the CloudFormation stack in the console. You may also see that information in the EC2 console.
 
-Each instance has a security group that allows SSH and ICMP from anywhere. This is so you can perform connectivity checks and troubleshooting.
+Each instance has a security group that allows SSH and ICMP from anywhere so you can perform connectivity checks and troubleshooting.
 
 ### Task 1: Check Public and Private Connectivity
 SSH to the instances in VPC 1 and VPC 3 using their public IP addresses.
 
-Try and ping the private IP addresses of all the other instances. Note that this currently doesn't work because there is no connectivity between the VPCs.
+Try and ping the private IP addresses of all the other instances. This currently won't work because there is (deliberately) no connectivity between the VPCs.
 
 In order to make troubleshooting easier in the next few steps, copy the SSH key you have to the instances in VPC 1 and VPC 3. On a Mac or Linux desktop you can use scp:
 ```
@@ -38,14 +35,15 @@ scp -i <key name> <key name> ec2-user@<public ip>:
 On a Windows desktop you should use a tool like PSCP (Putty SCP).
 
 ### Task 2: Create Transit Gateway and Enable VPC Communication
-Open the VPC console and go to the "Transit Gateways" section. Create a new transit gateway. During creation, disable the "Default route table association" and "Default route table propagation" options. These options automatically associate a route table to a VPC and propagate their routes. You're going to do this manually so that you can see the processes necessary to create more complex routing topologies.
+Open the VPC console and go to the "Transit Gateways" section and create a new transit gateway. During creation, disable the "Default route table association" and "Default route table propagation" options. These options automatically associate a route table to a VPC and propagate their routes. You're going to do this manually so that you can see the processes necessary to create more complex routing topologies.
 
 In the "Transit Gateway Attachments" section attach each of the four VPCs to the Transit Gateway. Note that each VPC only has a single subnet but in a production environment you would normally attach all subnets to the Transit Gateway. A subnet without an attachment can only reach the Transit Gateway through another subnet which would be acceptable if the subnets were in the same availability zone. If they weren't, there would be cross-AZ traffic so it is generally best to attach all subnets to the Transit Gateway.
 
 Conceptually, what you've created is the following network:
-!(Transit Gateway setup)[Transit-Gateway-setup.png]
 
-Now SSH back to the instances in VPC 1 and VPC 3. Try and ping the other instances. Once again this doesn't work because attaching the VPCs to the Transit Gateway doesn't automatically create a routing topology - in this case because the automatic association and propagation was disabled in the Transit Gateway creation above.
+![Transit Gateway setup](Transit-Gateway-setup.png)
+
+Now SSH back to the instances in VPC 1 and VPC 3. Try and ping the private addresses of the other instances. This doesn't work because attaching the VPCs to the Transit Gateway doesn't automatically create a routing topology - in this case because the automatic association and propagation was disabled in the Transit Gateway creation above.
 
 ### Task 3: Associate VPCs with Transit Gateway
 Inn the "Transit Gateway Route Tables" section of the console create a route table. Then associate each of the four VPCs with that route table.
@@ -63,29 +61,29 @@ Manually add a propagation to the Transit Gateway Route Table for each VPC.
 
 Once again, SSH to the instances and try to ping the other instances. You've pretty much completely configured Transit Gateway but this still doesn't work. The reason is that the VPCs don't know how to route to the Transit Gateway. Even though you have attached the VPC to the Transit Gateway and associated a Transit Gateway route table to each VPC you haven't modified the VPC route tables at all. Unlike VPN and Direct Connect, Transit Gateway does not automatically add routes to the VPC route tables.
 
-You can confirm this by going to the VPC route tables for each VPC. They only have their own internal routes (172.17.x.0/24) and a default route (0.0.0.0/0) in VPC 1 and VPC 3 going to their respective Internet Gateway.
+You can confirm this by looking at the VPC route tables for each VPC. They only have their own internal routes (172.17.x.0/24) and a default route (0.0.0.0/0) in VPC 1 and VPC 3 going to their respective Internet Gateways.
 
 ### Task 5: Adding Transit Gateway Routes to the VPC Route Tables
 In the VPC console, open the route table for VPC 1. Add a route where the destination network is "172.16.0.0/16" and the target (where the packets should go) is the Transit Gateway. This tells the VPC that all packets for any 172.16.x.x network are via the Transit Gateway.
 
 Note that if you wanted all traffic to go via the Transit Gateway you would use a default route (0.0.0.0/0) but you can't do that in this case because there is already a default route to the VPC Internet Gateway.
 
-SSH to the host in VPC 1 and try to ping the other instances. Note that this still doesn't work because routing is two-way. VPC 1 knows how to route to the other VPCs but they don't know how to route back. If you were running a packet debug on the host in VPC 3 and you were pinging the internal address you would see the ICMP packets hitting the host and the replies being sent - but they would never reach VPC 1 because there is no route in VPC 3 back to VPC 1.
+SSH to the host in VPC 1 and try to ping the other instances. Note that this still doesn't work because routing is a two-way process and it has to happen at every step of the way. VPC 1 knows how to route to the other VPCs but they don't know how to route back. If you were running a packet debug on the host in VPC 3 and you were pinging the internal address you would see the ICMP packets hitting the host and the replies being sent - but they would never reach VPC 1 because there is no route in VPC 3 back to VPC 1.
 
 So, go back to the VPC console and open the route table for VPC 3. Here again, add a route for network "172.16.0.0/16" where the target is the Transit Gateway.
 
-In the route tables for VPC 2 and VPC 4, add a route for network "0.0.0.0/0" where the target is Transit Gateway. In these two VPCs you can use a default route because you do want all traffic to go to the Transit Gateway - there is no Internet Gateway route to worry about. Note that using a route of "172.16.0.0/16" in these VPCs would work just as well.
+In the route tables for VPC 2 and VPC 4, add a route for network "0.0.0.0/0" where the target is your Transit Gateway. In these two VPCs you can use a default route because you do want all traffic to go to the Transit Gateway - there is no Internet Gateway route to worry about. Note that using a route of "172.16.0.0/16" in these VPCs would work just as well.
 
 If you now SSH to the instance you can ping and SSH between their private addresses. You have full connectivity between all of the VPCs via Transit Gateway.
 
 ### Task 6: Internet Connectivity Check
-Now that you have a working network let's see if we can get Internet connectivity from VPC 2 via VPC 1 - after all, VPC 1 has an Internet Gateway.
+Now that you have a working network let's see if Internet connectivity is available from VPC 2 via VPC 1 - after all, VPC 1 has an Internet Gateway.
 
 Add a default route to the Transit Gateway Route Table. The CIDR (the destination network) is "0.0.0.0/0" and VPC 1 is the attachment you want it to use. That's all you have to do because there is a default route in VPC 2 that is sending all traffic to the Transit Gateway and once the traffic is routed to VPC 1 there is a default route there sending all traffic to the Internet Gateway.
 
-SSH to the instance in VPC 1 and verify you can ping something on the internet like "www.amazon.com".
+SSH to the instance in VPC 1 and verify you can ping something on the internet like www.amazon.com.
 
-Then SSH to the instance in VPC 2. Can you ping "www.amazon.com"?
+Then SSH to the instance in VPC 2. Can you ping www.amazon.com?
 
 Spoiler: No, you can't. This same scenario will also fail if the VPCs are peered together and there is no Transit Gateway in the mix. In both situations, the non-transitive routing attribute of VPCs takes over - traffic that enters a VPC from another VPC can't then exit.
 
@@ -124,4 +122,5 @@ When done, delete the CloudFormation stack.
 In this lab you've seen how Transit Gateway can be used to connect VPCs together in a few different ways.
 
 One final diagram as a reference to the way VPCs are attached, associated and propagated within Transit Gateway.
+
 ![Transit Gateway concepts](Transit-Gateway-Overview.png)
