@@ -14,7 +14,7 @@ Using the [CloudFormation template](tgw-lab.yaml) in this repo, launch a stack i
 
 The template creates four VPCs and four EC2 hosts (one in each region) as per the following diagram.
 
-![VPC Setup](VPC-Setup.png)
+![VPC Setup](VPC-setup.png)
 
 You must select a SSH key pair in the region you are using. If you haven't already done so, create a key pair before launching the template.
 
